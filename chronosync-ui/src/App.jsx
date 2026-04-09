@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
+import IncidentBriefing from "./components/IncidentBriefing";
 import MessageBubble from "./components/MessageBubble";
 import SimControlPanel from "./components/SimControlPanel";
 import TaskBoard from "./components/TaskBoard";
@@ -135,6 +136,7 @@ function playDeliveryTone() {
 }
 
 function App() {
+  const [showBriefing, setShowBriefing] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
   const [fieldMessages, setFieldMessages] = useState([PRESET_FIELD_MSG, PRESET_FIELD_MSG_2]);
   const [hqMessages, setHqMessages] = useState([PRESET_FIELD_MSG, PRESET_HQ_MSG, PRESET_FIELD_MSG_2]);
@@ -171,9 +173,11 @@ function App() {
       : networkConfig.delay_ms / 1000 + "s";
 
   useEffect(() => {
+    if (showBriefing) return;
+    setShowSplash(true);
     const timer = setTimeout(() => setShowSplash(false), 2200);
     return () => clearTimeout(timer);
-  }, []);
+  }, [showBriefing]);
 
   useEffect(() => {
     const tick = setInterval(() => {
@@ -498,6 +502,7 @@ function App() {
   };
 
   const handleReset = async () => {
+    setShowBriefing(true);
     setFieldMessages([PRESET_FIELD_MSG, PRESET_FIELD_MSG_2]);
     setHqMessages([PRESET_FIELD_MSG, PRESET_HQ_MSG, PRESET_FIELD_MSG_2]);
     setInTransitMessages([]);
@@ -546,6 +551,10 @@ function App() {
       // no-op
     }
   };
+
+  if (showBriefing) {
+    return <IncidentBriefing onComplete={() => setShowBriefing(false)} />;
+  }
 
   if (showSplash) {
     return (

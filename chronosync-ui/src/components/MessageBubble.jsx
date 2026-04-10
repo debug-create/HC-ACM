@@ -1,29 +1,33 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PRIORITIES, ROLES, STATUS_COLORS } from "../constants";
 
+const ROLE_BORDER_COLORS = {
+  FIELD_MEDIC: "#3B82F6",
+  RESCUE_LEAD: "#10B981",
+  SECTOR_COMMANDER: "#F59E0B",
+  HQ_OPERATOR: "#8B5CF6",
+};
+
 function MessageBubble({ message, isOwnMessage }) {
-  const [isAdvisoryExpanded, setIsAdvisoryExpanded] = useState(
-    message.id === "preset-1" ||
-      message.id === "preset-3" ||
-      message.advisoryStatus === "loading"
-  );
+  const [isAdvisoryExpanded, setIsAdvisoryExpanded] = useState(false);
   const outerRef = useRef(null);
   const isNew = useRef(
-    message.status !== "DELIVERED" || message.id === "preset-1" || message.id === "preset-2" || message.id === "preset-3"
+    message.id === "preset-1" || message.id === "preset-2" || message.id === "preset-3"
       ? false
       : true
   );
 
   useEffect(() => {
     if (isNew.current && outerRef.current) {
-      outerRef.current.classList.add("message-arriving");
-      const t = setTimeout(() => {
-        outerRef.current?.classList.remove("message-arriving");
-      }, 600);
-      return () => clearTimeout(t);
+      if (message.status === "DELIVERED") {
+        outerRef.current.classList.add("row-delivered-flash");
+        const t = setTimeout(() => {
+          outerRef.current?.classList.remove("row-delivered-flash");
+        }, 300);
+        return () => clearTimeout(t);
+      }
     }
-    return undefined;
-  }, []);
+  }, [message.status]);
 
   const role = ROLES[message.sender_role] || ROLES.FIELD_MEDIC;
   const priority = PRIORITIES[message.priority] || PRIORITIES.STANDARD;
@@ -33,23 +37,30 @@ function MessageBubble({ message, isOwnMessage }) {
     QUEUED: { bg: "#1C1917", color: "#78716C", text: "● QUEUED" },
     IN_TRANSIT: { bg: "#451A03", color: "#F59E0B", text: "◉ IN TRANSIT" },
     DELIVERED: { bg: "#14532D", color: "#86EFAC", text: "✓ DELIVERED" },
-    CONFLICT: { bg: "#7F1D1D", color: "#FCA5A5", text: "⚠ CONFLICT" },
+    CONFLICT: { bg: "#7F1D1D", color: "#FCA5A5", text: "⚠ STATE CONFLICT" },
   }[message.status] || { bg: "#1C1917", color: STATUS_COLORS.QUEUED, text: message.status };
 
   const priorityText =
     message.priority === "HIGH" ? "● HIGH" : message.priority === "INFO" ? "INFO" : "STANDARD";
 
+  const borderColor = ROLE_BORDER_COLORS[message.sender_role] || "#3B82F6";
+
+  let containerClass = "";
+  if (message.status === "CONFLICT") {
+    containerClass = "row-conflict-flash";
+  }
+
   return (
     <div
       ref={outerRef}
+      className={containerClass}
       style={{
         position: "relative",
         background: message.status === "CONFLICT" ? "#1A0A0A" : "#161B22",
         borderRadius: 6,
         padding: "10px 12px",
-        borderLeft: `4px solid ${role.color}`,
+        borderLeft: message.status !== "CONFLICT" ? `2px solid ${borderColor}` : undefined,
         marginBottom: 2,
-        border: message.status === "CONFLICT" ? "1px solid #EF4444" : "1px solid transparent",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
@@ -100,7 +111,7 @@ function MessageBubble({ message, isOwnMessage }) {
             gap: 4,
           }}
         >
-          {message.status === "IN_TRANSIT" && <span className="status-pulse-dot" />}
+          {message.status === "IN_TRANSIT" && <span className="transit-pulse-dot-new" />}
           {statusConfig.text}
         </span>
       </div>
@@ -111,18 +122,18 @@ function MessageBubble({ message, isOwnMessage }) {
 
       {message.status === "CONFLICT" && (
         <div
+          className="conflict-banner-slide"
           style={{
-            marginTop: 8,
             background: "#450A0A",
             color: "#FCA5A5",
             padding: "6px 10px",
             borderRadius: 4,
             fontSize: 11,
             fontFamily: "monospace",
+            borderLeft: "4px solid #EF4444",
           }}
         >
-          STATE CONFLICT — Msg #{message.sequence_number} references contradictory field state. Human resolution
-          required.
+          STATE CONFLICT — Msg {seq} vs #{message.conflict_with || "Y"} — Human resolution required
         </div>
       )}
 
@@ -142,19 +153,12 @@ function MessageBubble({ message, isOwnMessage }) {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2L20 5V11C20 16 16.8 20.5 12 22C7.2 20.5 4 16 4 11V5L12 2Z" stroke="#60A5FA" strokeWidth="1.5" />
-              </svg>
               <span style={{ fontSize: 10, color: "#93C5FD", fontFamily: "monospace", letterSpacing: "0.08em" }}>
                 ICS PROTOCOL ADVISORY
               </span>
             </div>
             <div>
-              {message.advisoryStatus === "loading" && <span className="advisory-spinner" />}
-              {message.advisoryStatus === "loaded" && (
-                <span style={{ fontSize: 10, color: "#4B5563" }}>{isAdvisoryExpanded ? "▲" : "▼"}</span>
-              )}
-              {message.advisoryStatus === "error" && <span style={{ color: "#EF4444" }}>⚠</span>}
+              <span style={{ fontSize: 10, color: "#4B5563" }}>{isAdvisoryExpanded ? "▲" : "▼"}</span>
             </div>
           </div>
 
@@ -176,13 +180,21 @@ function MessageBubble({ message, isOwnMessage }) {
                 </div>
               )}
               {message.advisoryStatus === "loaded" && (
-                <div style={{ whiteSpace: "pre-wrap", fontSize: 12, color: "#CBD5E1", lineHeight: 1.6 }}>
-                  {message.advisoryText}
+                <div className="advisory-reveal">
+                  <div style={{ marginBottom: 6 }}>
+                    <span style={{ display: "block", fontSize: 10, textTransform: "uppercase", color: "#60A5FA", fontFamily: "monospace", marginBottom: 2 }}>FIELD AUTHORITY</span>
+                    <span style={{ fontSize: 13, color: "#CBD5E1", lineHeight: 1.6 }}>{message.advisoryAuthority || "Awaiting authorization..."}</span>
+                  </div>
+                  <div style={{ marginBottom: 6 }}>
+                    <span style={{ display: "block", fontSize: 10, textTransform: "uppercase", color: "#60A5FA", fontFamily: "monospace", marginBottom: 2 }}>PROTOCOL REF</span>
+                    <span style={{ fontSize: 13, color: "#CBD5E1", lineHeight: 1.6 }}>{message.advisoryProtocol || "Referencing docs..."}</span>
+                  </div>
+                  <div>
+                    <span style={{ display: "block", fontSize: 10, textTransform: "uppercase", color: "#60A5FA", fontFamily: "monospace", marginBottom: 2 }}>RISK FLAG</span>
+                    <span style={{ fontSize: 13, color: "#CBD5E1", lineHeight: 1.6 }}>{message.advisoryRisk || "Assessing risk profile..."}</span>
+                  </div>
                 </div>
               )}
-              <div style={{ fontSize: 10, color: "#374151", fontStyle: "italic", marginTop: 8 }}>
-                AI-generated from emergency protocols. Not a command decision.
-              </div>
             </div>
           )}
         </div>
@@ -192,3 +204,4 @@ function MessageBubble({ message, isOwnMessage }) {
 }
 
 export default MessageBubble;
+

@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import IncidentBriefing from "./components/IncidentBriefing";
 import MessageBubble from "./components/MessageBubble";
 import SimControlPanel from "./components/SimControlPanel";
 import TaskBoard from "./components/TaskBoard";
 import TransitMap from "./components/TransitMap";
-import { API_URL, WS_URL } from "./constants";
+import { API_URL, DELAY_MODES, WS_URL } from "./constants";
 
 const PRESET_FIELD_MSG = {
   id: "preset-1",
@@ -20,7 +20,7 @@ const PRESET_FIELD_MSG = {
   status: "DELIVERED",
   advisoryStatus: "loaded",
   advisoryText:
-    "FIELD AUTHORITY: Rescue Lead is authorized to conduct visual structural assessment from safe perimeter under ICS Field Ops delegation. No HQ approval needed for observation-only activity.\n\nPROTOCOL REF: ICS 300 §4.2 — Partial collapse extraction requires certified structural evaluation before entry. Field commander must document hazard assessment prior to personnel deployment.\n\nRISK FLAG: Secondary collapse probability is elevated within first 6 hours post-event. Aftershock risk is HIGH. Maintain 15m exclusion zone around unstable structure until structural team clears entry.",
+    "FIELD AUTHORITY: Rescue Lead is authorized to conduct visual structural assessment from safe perimeter under ICS Field Ops delegation. No HQ approval needed for observation-only activity.\n\nPROTOCOL REF: ICS 300 Â§4.2 â€” Partial collapse extraction requires certified structural evaluation before entry. Field commander must document hazard assessment prior to personnel deployment.\n\nRISK FLAG: Secondary collapse probability is elevated within first 6 hours post-event. Aftershock risk is HIGH. Maintain 15m exclusion zone around unstable structure until structural team clears entry.",
 };
 
 const PRESET_HQ_MSG = {
@@ -51,7 +51,7 @@ const PRESET_FIELD_MSG_2 = {
   status: "DELIVERED",
   advisoryStatus: "loaded",
   advisoryText:
-    "FIELD AUTHORITY: Field Medic authorized to classify casualty priority under ICS Medical Branch without HQ approval.\n\nPROTOCOL REF: NDRF Medical SOP §3.1 — Critical casualties requiring surgical intervention must be flagged Priority-1. Field Medic has authority to request airlift upgrade.\n\nRISK FLAG: Priority-1 airlift requests require LZ clearance confirmation. Ensure landing zone is marked and secured before airlift ETA.",
+    "FIELD AUTHORITY: Field Medic authorized to classify casualty priority under ICS Medical Branch without HQ approval.\n\nPROTOCOL REF: NDRF Medical SOP Â§3.1 â€” Critical casualties requiring surgical intervention must be flagged Priority-1. Field Medic has authority to request airlift upgrade.\n\nRISK FLAG: Priority-1 airlift requests require LZ clearance confirmation. Ensure landing zone is marked and secured before airlift ETA.",
 };
 
 const PRESET_TASKS = [
@@ -146,7 +146,7 @@ function App() {
     delay_ms: 8000,
     bandwidth: 100,
     packetLoss: 0,
-    mode: "DEMO — 8 SEC",
+    mode: "DEMO â€” 8 SEC",
     isOffline: false,
   });
   const [queuedMessages, setQueuedMessages] = useState([]);
@@ -158,6 +158,11 @@ function App() {
   const [hqPriority, setHqPriority] = useState("STANDARD");
   const [fieldRole, setFieldRole] = useState("RESCUE_LEAD");
   const [fieldPriority, setFieldPriority] = useState("STANDARD");
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [simOpen, setSimOpen] = useState(false);
+  const [activeIcon, setActiveIcon] = useState(null);
+  const [deliveredIds, setDeliveredIds] = useState(new Set());
+  const [activePanel, setActivePanel] = useState(null);
 
   const seqRef = useRef(3);
   const startedAtRef = useRef(Date.now());
@@ -171,6 +176,9 @@ function App() {
     networkConfig.delay_ms >= 60000
       ? Math.floor(networkConfig.delay_ms / 60000) + "m"
       : networkConfig.delay_ms / 1000 + "s";
+
+  const confirmedCount = tasks.filter((t) => t.sync_state === "CONFIRMED").length;
+  const taskBar = Array.from({ length: 6 }, (_, i) => (i < confirmedCount ? "\u2593" : "\u2591")).join("");
 
   useEffect(() => {
     if (showBriefing) return;
@@ -198,7 +206,7 @@ function App() {
     document.title =
       inTransitMessages.length > 0
         ? `[${inTransitMessages.length} IN TRANSIT] CHRONOSYNC`
-        : "CHRONOSYNC — FIELD OPS CONSOLE";
+        : "CHRONOSYNC â€” FIELD OPS CONSOLE";
   }, [inTransitMessages.length]);
 
   useEffect(() => {
@@ -255,6 +263,16 @@ function App() {
       try {
         const { type, payload } = JSON.parse(event.data);
         if (type === "MESSAGE_DELIVERED") {
+          setDeliveredIds((prev) => new Set([...prev, payload.id]));
+          setTimeout(() => {
+            setDeliveredIds((prev) => {
+              const next = new Set(prev);
+              next.delete(payload.id);
+              return next;
+            });
+          }, 600);
+          setActivePanel(payload.sender_side === "FIELD" ? "HQ" : "FIELD");
+          setTimeout(() => setActivePanel(null), 3200);
           setInTransitMessages((prev) => prev.filter((m) => m.id !== payload.id));
           if (payload.sender_side === "FIELD") {
             setFieldMessages((prev) =>
@@ -299,6 +317,20 @@ function App() {
             );
           setFieldMessages(mark);
           setHqMessages(mark);
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const o1 = ctx.createOscillator();
+          const o2 = ctx.createOscillator();
+          const g = ctx.createGain();
+          o1.connect(g);
+          o2.connect(g);
+          g.connect(ctx.destination);
+          o1.frequency.value = 220;
+          o2.frequency.value = 185;
+          g.gain.value = 0.07;
+          o1.start();
+          o2.start();
+          o1.stop(ctx.currentTime + 0.15);
+          o2.stop(ctx.currentTime + 0.15);
         }
       } catch (err) {
         // ignore
@@ -334,7 +366,7 @@ function App() {
   async function getProtocolAdvisory(messageContent) {
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
-      return "FIELD AUTHORITY: Field lead retains authority under ICS standing delegation.\nPROTOCOL REF: ICS 300 — Field operations continue under last confirmed directive during comm delay.\nRISK FLAG: Verify all actions against most recent confirmed HQ order before proceeding.";
+      return "FIELD AUTHORITY: Field lead retains authority under ICS standing delegation.\nPROTOCOL REF: ICS 300 â€” Field operations continue under last confirmed directive during comm delay.\nRISK FLAG: Verify all actions against most recent confirmed HQ order before proceeding.";
     }
     try {
       const response = await fetch(
@@ -358,10 +390,10 @@ function App() {
       const data = await response.json();
       return (
         data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        "FIELD AUTHORITY: Field lead retains authority under ICS standing delegation.\nPROTOCOL REF: ICS 300 — Field operations continue under last confirmed directive during comm delay.\nRISK FLAG: Verify all actions against most recent confirmed HQ order before proceeding."
+        "FIELD AUTHORITY: Field lead retains authority under ICS standing delegation.\nPROTOCOL REF: ICS 300 â€” Field operations continue under last confirmed directive during comm delay.\nRISK FLAG: Verify all actions against most recent confirmed HQ order before proceeding."
       );
     } catch (e) {
-      return "FIELD AUTHORITY: Field lead retains authority under ICS standing delegation.\nPROTOCOL REF: ICS 300 — Field operations continue under last confirmed directive during comm delay.\nRISK FLAG: Verify all actions against most recent confirmed HQ order before proceeding.";
+      return "FIELD AUTHORITY: Field lead retains authority under ICS standing delegation.\nPROTOCOL REF: ICS 300 â€” Field operations continue under last confirmed directive during comm delay.\nRISK FLAG: Verify all actions against most recent confirmed HQ order before proceeding.";
     }
   }
 
@@ -502,6 +534,7 @@ function App() {
   };
 
   const handleReset = async () => {
+    await fetch(`${API_URL}/reset`, { method: "POST" });
     setShowBriefing(true);
     setFieldMessages([PRESET_FIELD_MSG, PRESET_FIELD_MSG_2]);
     setHqMessages([PRESET_FIELD_MSG, PRESET_HQ_MSG, PRESET_FIELD_MSG_2]);
@@ -516,7 +549,7 @@ function App() {
         delay_ms: 8000,
         bandwidth_pct: 100,
         packet_loss_pct: 0,
-        mode: "DEMO — 8 SEC",
+        mode: "DEMO â€” 8 SEC",
         isOffline: false,
         bandwidth: 100,
         packetLoss: 0,
@@ -610,58 +643,121 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-[#0F1117] text-[#E8E8E8] overflow-hidden">
-      <div
-        className="h-[18%] flex-shrink-0 bg-[#0D1117] p-3 flex gap-3"
-        style={{ borderBottom: "1px solid #30363D", boxShadow: "0 2px 8px rgba(0,0,0,0.4)" }}
-      >
-        <TransitMap
-          networkConfig={networkConfig}
-          inTransitMessages={inTransitMessages}
-          queuedMessages={queuedMessages}
-          fieldMsgCount={fieldMessages.length}
-          hqMsgCount={hqMessages.length}
-        />
-        <SimControlPanel
-          networkConfig={networkConfig}
-          stats={stats}
-          onUpdateConfig={onUpdateConfig}
-          onToggleLink={onToggleLink}
-          onReset={handleReset}
-        />
+      <style>{`
+        @keyframes csSlideDown {
+          from { transform: translateY(-100%); }
+          to { transform: translateY(0); }
+        }
+        .cs-slideDown { animation: csSlideDown 200ms ease; }
+      `}</style>
+
+      <div className="h-14 flex-shrink-0 w-full bg-[#0F1117] border-b border-[#1F2937] flex items-center">
+        <div className="h-full w-[65%] px-3 flex items-center overflow-hidden">
+          <div className="h-full w-full origin-left scale-[0.85] flex items-center">
+            <TransitMap
+              networkConfig={networkConfig}
+              inTransitMessages={inTransitMessages}
+              queuedMessages={queuedMessages}
+              fieldMsgCount={fieldMessages.length}
+              hqMsgCount={hqMessages.length}
+            />
+          </div>
+        </div>
+
+        <div className="relative h-full w-[35%] px-3 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveIcon(null);
+              setSimOpen((prev) => !prev);
+            }}
+            className={[
+              "h-8 w-8 rounded-md border border-[#374151] bg-transparent text-[#9CA3AF]",
+              "hover:bg-[#1F2937] transition-colors",
+              simOpen ? "border-[#10B981] text-[#10B981]" : "",
+            ].join(" ")}
+            aria-label="Sim controls"
+          >
+            {"\u2699"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveIcon(null);
+              setTasksOpen((prev) => !prev);
+            }}
+            className={[
+              "h-8 w-8 rounded-md border border-[#374151] bg-transparent text-[#9CA3AF]",
+              "hover:bg-[#1F2937] transition-colors",
+              tasksOpen ? "border-[#10B981] text-[#10B981]" : "",
+            ].join(" ")}
+            aria-label="Mission tasks"
+          >
+            {"\u2630"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveIcon((prev) => (prev === "network" ? null : "network"))}
+            className={[
+              "h-8 w-8 rounded-md border border-[#374151] bg-transparent text-[#9CA3AF]",
+              "hover:bg-[#1F2937] transition-colors",
+              activeIcon === "network" ? "border-[#10B981] text-[#10B981]" : "",
+            ].join(" ")}
+            aria-label="Network"
+          >
+            {"\u25C9"}
+          </button>
+
+          {activeIcon === "network" ? (
+            <div className="absolute right-0 top-full mt-2 w-[260px] rounded-md border border-[#30363D] bg-[#0D1117] p-3 shadow-[0_10px_24px_rgba(0,0,0,0.45)]">
+              <div className="text-[10px] font-mono text-[#6B7280]">NETWORK</div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] font-mono text-[#E8E8E8]">
+                <div className="text-[#6B7280]">DELAY</div>
+                <div className="text-right">{delayLabel}</div>
+                <div className="text-[#6B7280]">BANDWIDTH</div>
+                <div className="text-right">{networkConfig.bandwidth}%</div>
+                <div className="text-[#6B7280]">LOSS</div>
+                <div className="text-right">{networkConfig.packetLoss}%</div>
+                <div className="text-[#6B7280]">QUEUE</div>
+                <div className="text-right">{queuedMessages.length}</div>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[10px] font-mono text-[#6B7280]">
+                <span>STATUS</span>
+                <span className={networkConfig.isOffline ? "text-[#EF4444]" : "text-[#10B981]"}>
+                  {networkConfig.isOffline ? "LINK DOWN" : "ONLINE"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="mt-3 w-full rounded-md border border-[#374151] bg-transparent px-2 py-1 text-[11px] font-mono text-[#9CA3AF] hover:bg-[#1F2937] transition-colors"
+              >
+                RESET DEMO
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <div className="h-[62%] flex overflow-hidden relative">
-        {networkConfig.bandwidth < 30 && networkConfig.isOffline !== true && (
-          <div
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              zIndex: 10,
-              background: "#451A03",
-              color: "#FCD34D",
-              padding: "5px 16px",
-              fontSize: 12,
-              fontFamily: "monospace",
-              borderBottom: "1px solid #92400E",
-            }}
-          >
-            ⚡ CRITICAL-ONLY MODE — Standard messages queued. HIGH priority messages transmitting.
-          </div>
-        )}
+      {networkConfig.isOffline === true ? (
+        <div className="h-8 flex-shrink-0 cs-slideDown bg-[#7F1D1D] text-[#FCA5A5] font-mono text-[12px] flex items-center justify-center">
+          {"\u26A0"} LINK DOWN {"\u2014"} {queuedMessages.length} messages queued locally
+        </div>
+      ) : networkConfig.bandwidth < 30 ? (
+        <div className="h-8 flex-shrink-0 cs-slideDown bg-[#451A03] text-[#FCD34D] font-mono text-[12px] flex items-center justify-center">
+          {"\u26A1"} CRITICAL-ONLY MODE {"\u2014"} Standard messages queued. HIGH priority transmitting.
+        </div>
+      ) : null}
 
-        <div className="w-1/2 flex flex-col" style={{ borderLeft: "2px solid #10B981" }}>
-          {networkConfig.isOffline === true && (
-            <div className="bg-[#450A0A] text-[#FCA5A5] px-4 py-1.5 text-[12px] font-mono border-b border-[#7F1D1D]">
-              LINK DOWN — {queuedMessages.length} messages queued
-            </div>
-          )}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col">
           <div
             className="bg-[#0D1117] px-[14px] py-[8px] border-b border-[#21262D] flex justify-between items-center"
             style={{ borderTop: "2px solid #10B981" }}
           >
-            <span className="text-[11px] text-[#9CA3AF] font-mono uppercase">FIELD TEAM — RESCUE LEAD</span>
+            <span className="text-[11px] text-[#9CA3AF] font-mono uppercase">FIELD TEAM â€” RESCUE LEAD</span>
             <div className="flex items-center gap-[6px]">
               <span
                 className="w-[7px] h-[7px] rounded-full"
@@ -678,7 +774,13 @@ function App() {
             style={{ paddingTop: 8, paddingBottom: 8 }}
           >
             {fieldMessages.map((m) => (
-              <MessageBubble key={m.id} message={m} isOwnMessage={m.sender_side === "FIELD"} />
+              <MessageBubble
+                key={m.id}
+                message={m}
+                isOwnMessage={m.sender_side === "FIELD"}
+                isNewlyDelivered={deliveredIds.has(m.id)}
+                isActive={activePanel === "FIELD"}
+              />
             ))}
           </div>
           <div className="bg-[#0D1117] p-3 border-t border-[#21262D]">
@@ -760,7 +862,7 @@ function App() {
                   alignSelf: "stretch",
                 }}
               >
-                {networkConfig.isOffline === true ? "🔒 QUEUED" : "SEND"}
+                {networkConfig.isOffline === true ? "ðŸ”’ QUEUED" : "SEND"}
               </button>
             </div>
           </div>
@@ -769,7 +871,7 @@ function App() {
         <div
           style={{
             width: 2,
-            background: "#21262D",
+            background: "#1F2937",
             flexShrink: 0,
             display: "flex",
             alignItems: "center",
@@ -795,21 +897,16 @@ function App() {
               zIndex: 5,
             }}
           >
-            {delayLabel}
+            {"\u25C4"} {delayLabel} {"\u25BA"}
           </div>
         </div>
 
-        <div className="w-1/2 flex flex-col" style={{ borderRight: "2px solid #3B82F6" }}>
-          {networkConfig.isOffline === true && (
-            <div className="bg-[#450A0A] text-[#FCA5A5] px-4 py-1.5 text-[12px] font-mono border-b border-[#7F1D1D]">
-              LINK DOWN — {queuedMessages.length} messages queued
-            </div>
-          )}
+        <div className="flex-1 min-w-0 flex flex-col">
           <div
             className="bg-[#0D1117] px-[14px] py-[8px] border-b border-[#21262D] flex justify-between items-center"
             style={{ borderTop: "2px solid #3B82F6" }}
           >
-            <span className="text-[11px] text-[#9CA3AF] font-mono uppercase">HQ — INCIDENT COMMAND</span>
+            <span className="text-[11px] text-[#9CA3AF] font-mono uppercase">HQ â€” INCIDENT COMMAND</span>
             <div className="flex items-center gap-[6px]">
               <span
                 className="w-[7px] h-[7px] rounded-full"
@@ -826,7 +923,13 @@ function App() {
             style={{ paddingTop: 8, paddingBottom: 8 }}
           >
             {hqMessages.map((m) => (
-              <MessageBubble key={m.id} message={m} isOwnMessage={m.sender_side === "HQ"} />
+              <MessageBubble
+                key={m.id}
+                message={m}
+                isOwnMessage={m.sender_side === "HQ"}
+                isNewlyDelivered={deliveredIds.has(m.id)}
+                isActive={activePanel === "HQ"}
+              />
             ))}
           </div>
           <div className="bg-[#0D1117] p-3 border-t border-[#21262D]">
@@ -908,16 +1011,74 @@ function App() {
                   alignSelf: "stretch",
                 }}
               >
-                {networkConfig.isOffline === true ? "🔒 QUEUED" : "SEND"}
+                {networkConfig.isOffline === true ? "ðŸ”’ QUEUED" : "SEND"}
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="h-[20%] flex-shrink-0 border-t border-[#21262D] flex bg-[#0D1117]">
-        <TaskBoard title="MISSION TASKS — FIELD" tasks={tasks} onToggleTask={toggleTask} readonly={false} />
-        <TaskBoard title="MISSION TASKS — HQ VIEW" tasks={tasks} readonly={true} />
+      <div
+        className="flex flex-col flex-shrink-0 overflow-hidden border-t border-[#30363D] bg-[#161B22]"
+        style={{ height: tasksOpen ? 220 : 32, transition: "height 250ms ease" }}
+      >
+        <button
+          type="button"
+          onClick={() => setTasksOpen((prev) => !prev)}
+          className="h-8 w-full flex items-center justify-between px-3 font-mono text-[12px] text-[#E8E8E8]"
+        >
+          <span className="tracking-wide">
+            MISSION TASKS&nbsp;&nbsp;{taskBar}&nbsp;&nbsp;{confirmedCount}/6 CONFIRMED
+          </span>
+          <span className="text-[#9CA3AF]">{tasksOpen ? "\u25BC" : "\u25B2"}</span>
+        </button>
+
+        <div className="flex-1 min-h-0 border-t border-[#30363D] bg-[#0D1117] flex">
+          <TaskBoard title="MISSION TASKS - FIELD" tasks={tasks} onToggleTask={toggleTask} readonly={false} isActive={activePanel === "FIELD"} />
+          <TaskBoard title="MISSION TASKS - HQ VIEW" tasks={tasks} readonly={true} isActive={activePanel === "HQ"} />
+        </div>
+      </div>
+
+      <div className="hidden h-[20%] flex-shrink-0 border-t border-[#21262D] flex bg-[#0D1117]">
+        <TaskBoard title="MISSION TASKS - FIELD" tasks={tasks} onToggleTask={toggleTask} readonly={false} isActive={activePanel === "FIELD"} />
+        <TaskBoard title="MISSION TASKS - HQ VIEW" tasks={tasks} readonly={true} isActive={activePanel === "HQ"} />
+      </div>
+
+      {simOpen ? <div className="fixed inset-0 z-40" onClick={() => setSimOpen(false)} /> : null}
+      <div
+        className="fixed right-0 top-0 z-50 h-full overflow-hidden border-l border-[#30363D] bg-[#0D1117] transition-[width] duration-[250ms]"
+        style={{ width: simOpen ? 300 : 0 }}
+      >
+        <div className="h-full w-[300px] p-3 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] font-mono text-[#6B7280] tracking-[0.2em]">SIM CONTROL</div>
+            <button
+              type="button"
+              className="h-8 w-8 rounded-md border border-[#374151] bg-transparent text-[#9CA3AF] hover:bg-[#1F2937] transition-colors"
+              onClick={() => setSimOpen(false)}
+              aria-label="Close sim controls"
+            >
+              X
+            </button>
+          </div>
+
+          <SimControlPanel
+            config={networkConfig}
+            stats={stats}
+            onDelayChange={(ms) => {
+              const selected = DELAY_MODES.find((m) => m.ms === Number(ms)) || DELAY_MODES[0];
+              onUpdateConfig({ delay_ms: Number(ms), mode: selected.label });
+            }}
+            onBandwidthChange={(pct) => onUpdateConfig({ bandwidth: Number(pct), bandwidth_pct: Number(pct) })}
+            onPacketLossChange={(pct) => onUpdateConfig({ packetLoss: Number(pct), packet_loss_pct: Number(pct) })}
+            onDropConnection={() => {
+              if (!networkConfig.isOffline) onToggleLink();
+            }}
+            onRestoreConnection={() => {
+              if (networkConfig.isOffline) onToggleLink();
+            }}
+          />
+        </div>
       </div>
     </div>
   );

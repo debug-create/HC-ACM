@@ -116,6 +116,21 @@ function checkForConflicts(newMessage) {
 }
 
 // REST ENDPOINTS
+app.post('/api/reset', (req, res) => {
+  messages.length = 0;
+  tasks.forEach((t, i) => {
+    t.field_status = 'PENDING';
+    t.hq_status = 'UNKNOWN';  
+    t.sync_state = 'LOCAL_ONLY';
+    t.hq_synced_at = null;
+  });
+  Object.assign(networkConfig, {
+    delay_ms: 8000, bandwidth_pct: 100,
+    packet_loss_pct: 0, mode: 'DEMO', isOffline: false
+  });
+  broadcast('NETWORK_UPDATE', networkConfig, 'ALL');
+  res.json({ ok: true });
+});
 app.post('/api/send', (req, res) => {
   const { id, sequence_number, sender_role, sender_side, content, priority, sent_at, deliver_at } = req.body;
   
